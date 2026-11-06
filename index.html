@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>MASSOWSA Observer Log</title>
+<style>
+:root{--bg:#f3f6f7;--surface:#fff;--ink:#0d2b3a;--mute:#5b7280;--line:#d3dde2;--accent:#e8590c;--accent-ink:#fff;--sea:#0b5d7a;--ok:#1b7a4b;--bad:#b3261e}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#071a24;--surface:#0e2735;--ink:#e6f1f5;--mute:#8fa9b6;--line:#1f4254;--accent:#ff7a2e;--accent-ink:#1a0a00;--sea:#5cc2e3;--ok:#5ad39a;--bad:#ff8a80}}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font:16px/1.45 "Avenir Next","Segoe UI",system-ui,sans-serif;padding:env(safe-area-inset-top,0) 0 env(safe-area-inset-bottom,0)}
+main{max-width:720px;margin:0 auto;padding:16px}
+h1{font:700 1.5rem/1.2 Georgia,"Times New Roman",serif;margin:0 0 4px}
+h2{font:700 1.15rem Georgia,serif;margin:0 0 10px}
+p.sub{color:var(--mute);margin:0 0 16px}
+section{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:14px}
+label{display:block;font-size:.85rem;color:var(--mute);margin:8px 0 3px}
+input,textarea{width:100%;font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:9px}
+textarea{min-height:60px}
+button{font:inherit;font-weight:600;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--ink);padding:10px 14px;cursor:pointer}
+button:focus-visible,input:focus-visible,textarea:focus-visible{outline:3px solid var(--sea);outline-offset:2px}
+.mark{display:block;width:100%;font-size:1.4rem;padding:26px 10px;background:var(--accent);color:var(--accent-ink);border:0;border-radius:14px}
+.row{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.row>*{flex:1 1 140px}
+.entry{border-top:1px solid var(--line);padding:12px 0}
+.entry:first-child{border-top:0}
+.code{font:700 2rem/1 "Courier New",monospace;letter-spacing:.12em;color:var(--sea)}
+.meta{color:var(--mute);font-size:.88rem;margin-top:4px}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}
+.chip{background:var(--bg);border:1px solid var(--line);border-radius:999px;padding:3px 10px;font-size:.88rem}
+.warn{color:var(--bad)}
+.ok{color:var(--ok)}
+#status{min-height:1.4em;margin:8px 0 0;color:var(--mute);text-align:center}
+svg{width:100%;height:auto;background:var(--bg);border:1px solid var(--line);border-radius:8px}
+table{width:100%;border-collapse:collapse;font-size:.9rem}
+td,th{border-top:1px solid var(--line);padding:6px 4px;text-align:left;vertical-align:top}
+td.c{font:700 1rem "Courier New",monospace;color:var(--sea);white-space:nowrap}
+#photoWrap{overflow:auto;max-height:50vh;border:1px solid var(--line);border-radius:8px;margin:10px 0}
+#photoWrap img{max-width:none;width:100%;display:block}
+.hide{display:none}
+nav{display:flex;gap:6px;margin-bottom:14px}
+nav button{flex:1}
+nav button[aria-selected="true"]{background:var(--sea);color:var(--surface);border-color:var(--sea)}
+</style>
+</head>
+<body>
+<main>
+<h1>MASSOWSA observer log</h1>
+<p class="sub">Mark each stop with one tap. Write the code in your paper log so we can match everything later.</p>
+<nav role="tablist">
+  <button role="tab" aria-selected="true" data-tab="log">Log</button>
+  <button role="tab" aria-selected="false" data-tab="reconcile">Reconcile</button>
+</nav>
+
+<div id="tab-log">
+<section>
+  <h2>Swim details</h2>
+  <label for="swim">Swim name</label><input id="swim" placeholder="e.g. Boston Harbor marathon attempt">
+  <div class="row">
+    <div><label for="swimmer">Swimmer</label><input id="swimmer"></div>
+    <div><label for="observer">Observer</label><input id="observer"></div>
+  </div>
+</section>
+
+<section>
+  <button class="mark" id="mark">Mark stop</button>
+  <p id="status" role="status" aria-live="polite"></p>
+  <div class="row">
+    <button id="fill">Fill in missing weather</button>
+    <button id="csv">Download captures (CSV)</button>
+    <button id="json">Backup (JSON)</button>
+  </div>
+</section>
+
+<section>
+  <h2>Stops <span id="count" class="meta"></span></h2>
+  <svg id="track" viewBox="0 0 400 220" role="img" aria-label="Plot of stop locations"></svg>
+  <div id="list"></div>
+  <div class="row"><button id="clear">Clear all stops</button></div>
+</section>
+</div>
+
+<div id="tab-reconcile" class="hide">
+<section>
+  <h2>Reconcile with paper log</h2>
+  <p class="sub">Photograph the paper form after the swim. Read each row’s code on the photo and type what it says beside the matching code. Then export.</p>
+  <label for="photo">Photo of paper log</label>
+  <input id="photo" type="file" accept="image/*" capture="environment">
+  <div id="photoWrap" class="hide"><img id="photoImg" alt="Paper observer log"></div>
+  <div id="recRows"></div>
+  <div class="row">
+    <button id="recCsv">Download reconciled spreadsheet (CSV)</button>
+    <button id="recPng">Download reconciled image (PNG)</button>
+  </div>
+</section>
+</div>
+</main>
+
+<script>
+(function(){
+var KEY="massowsa-observer-v1", ALPHA="ACDEFGHJKLMNPQRTUVWXY34679";
+var S={swim:"",swimmer:"",observer:"",stops:[],written:{}};
+try{var raw=localStorage.getItem(KEY);if(raw)S=Object.assign(S,JSON.parse(raw));}catch(e){}
+function save(){try{localStorage.setItem(KEY,JSON.stringify(S));}catch(e){}}
+function $(id){return document.getElementById(id);}
+function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];});}
+function newCode(){var c;do{c="";for(var i=0;i<5;i++)c+=ALPHA[Math.floor(Math.random()*ALPHA.length)];}while(S.stops.some(function(s){return s.code===c;}));return c;}
+function compass(d){if(d==null)return"";return["N","NNE","NE","ENE","E","ESE","SE","SSE","S","SSW","SW","WSW","W","WNW","NW","NNW"][Math.round(d/22.5)%16];}
+function fmtTime(t){return new Date(t).toLocaleTimeString([],{hour:"numeric",minute:"2-digit"});}
+function status(m,cls){var e=$("status");e.textContent=m;e.className=cls||"";}
+
+["swim","swimmer","observer"].forEach(function(k){
+  $(k).value=S[k]||"";
+  $(k).addEventListener("input",function(){S[k]=$(k).value;save();});
+});
+
+function getGPS(){
+  return new Promise(function(res){
+    if(!navigator.geolocation)return res(null);
+    navigator.geolocation.getCurrentPosition(function(p){res({lat:p.coords.latitude,lon:p.coords.longitude,acc:p.coords.accuracy});},function(){res(null);},{enableHighAccuracy:true,timeout:15000,maximumAge:10000});
+  });
+}
+function getJSON(url){
+  var ctl=new AbortController(),t=setTimeout(function(){ctl.abort();},10000);
+  return fetch(url,{signal:ctl.signal}).then(function(r){clearTimeout(t);if(!r.ok)throw new Error(r.status);return r.json();});
+}
+function getWeather(lat,lon){
+  var w={airF:null,windMph:null,windDir:null,waterF:null,waveFt:null};
+  var wx=getJSON("https://api.open-meteo.com/v1/forecast?latitude="+lat+"&longitude="+lon+"&current=temperature_2m,wind_speed_10m,wind_direction_10m&temperature_unit=fahrenheit&wind_speed_unit=mph")
+    .then(function(j){var c=j.current||{};w.airF=c.temperature_2m;w.windMph=c.wind_speed_10m;w.windDir=c.wind_direction_10m;}).catch(function(){});
+  var mr=getJSON("https://marine-api.open-meteo.com/v1/marine?latitude="+lat+"&longitude="+lon+"&current=sea_surface_temperature,wave_height&temperature_unit=fahrenheit&length_unit=imperial")
+    .then(function(j){var c=j.current||{};w.waterF=c.sea_surface_temperature;w.waveFt=c.wave_height;}).catch(function(){});
+  return Promise.all([wx,mr]).then(function(){return w;});
+}
+
+$("mark").addEventListener("click",function(){
+  var stop={code:newCode(),t:Date.now(),lat:null,lon:null,acc:null,airF:null,windMph:null,windDir:null,waterF:null,waveFt:null,note:""};
+  S.stops.push(stop);save();render();
+  status("Stop "+stop.code+" saved. Getting location…","");
+  if(navigator.vibrate)navigator.vibrate(60);
+  getGPS().then(function(g){
+    if(!g){status("Stop "+stop.code+" saved. No GPS fix yet.","warn");return;}
+    stop.lat=g.lat;stop.lon=g.lon;stop.acc=g.acc;save();render();
+    status("Stop "+stop.code+" saved. Getting weather…","");
+    return getWeather(g.lat,g.lon).then(function(w){
+      Object.assign(stop,w);save();render();
+      var miss=stop.airF==null&&stop.waterF==null;
+      status(miss?"Stop "+stop.code+" saved with GPS. Weather unavailable; use “Fill in missing weather” when you have signal.":"Stop "+stop.code+" saved with GPS and conditions.",miss?"warn":"ok");
+    });
+  });
+});
+
+$("fill").addEventListener("click",function(){
+  var todo=S.stops.filter(function(s){return s.lat!=null&&(s.airF==null||s.waterF==null);});
+  if(!todo.length){status("Nothing to fill in.","");return;}
+  status("Filling "+todo.length+" stop(s)…","");
+  var p=Promise.resolve();
+  todo.forEach(function(s){p=p.then(function(){return getWeather(s.lat,s.lon).then(function(w){["airF","windMph","windDir","waterF","waveFt"].forEach(function(k){if(s[k]==null)s[k]=w[k];});});});});
+  p.then(function(){save();render();status("Done.","ok");});
+});
+
+function chips(s){
+  var a=[];
+  a.push(s.lat!=null?s.lat.toFixed(5)+", "+s.lon.toFixed(5):"No GPS");
+  a.push("Air "+(s.airF!=null?Math.round(s.airF)+"°F":"–"));
+  a.push("Water "+(s.waterF!=null?s.waterF.toFixed(1)+"°F":"–"));
+  a.push("Wind "+(s.windMph!=null?Math.round(s.windMph)+" mph "+compass(s.windDir):"–"));
+  if(s.waveFt!=null)a.push("Waves "+s.waveFt.toFixed(1)+" ft");
+  return a;
+}
+function render(){
+  $("count").textContent="("+S.stops.length+")";
+  var h="";
+  S.stops.slice().reverse().forEach(function(s){
+    h+='<div class="entry"><div class="code">'+esc(s.code)+'</div><div class="meta">'+new Date(s.t).toLocaleString()+'</div><div class="chips">'+chips(s).map(function(c){return'<span class="chip">'+esc(c)+'</span>';}).join("")+'</div><label for="n-'+s.code+'">Quick note (optional)</label><input id="n-'+s.code+'" data-code="'+s.code+'" value="'+esc(s.note)+'"></div>';
+  });
+  $("list").innerHTML=h||'<p class="meta">No stops yet. Tap “Mark stop” at your first check-in.</p>';
+  [].forEach.call($("list").querySelectorAll("input[data-code]"),function(i){i.addEventListener("input",function(){var s=S.stops.filter(function(x){return x.code===i.dataset.code;})[0];s.note=i.value;save();});});
+  plot();renderRec();
+}
+function plot(){
+  var pts=S.stops.filter(function(s){return s.lat!=null;}),svg=$("track");
+  if(!pts.length){svg.innerHTML='<text x="200" y="115" text-anchor="middle" fill="currentColor" opacity=".5" font-size="13">Stops with GPS will plot here</text>';return;}
+  var la=pts.map(function(p){return p.lat;}),lo=pts.map(function(p){return p.lon;});
+  var minLa=Math.min.apply(null,la),maxLa=Math.max.apply(null,la),minLo=Math.min.apply(null,lo),maxLo=Math.max.apply(null,lo);
+  var k=Math.cos(minLa*Math.PI/180),dx=Math.max((maxLo-minLo)*k,1e-4),dy=Math.max(maxLa-minLa,1e-4),sc=Math.min(360/dx,180/dy);
+  var ox=(400-dx*sc)/2,oy=(220-dy*sc)/2;
+  function X(p){return ox+(p.lon-minLo)*k*sc;}function Y(p){return 220-oy-(p.lat-minLa)*sc;}
+  var d=pts.map(function(p,i){return(i?"L":"M")+X(p).toFixed(1)+" "+Y(p).toFixed(1);}).join(" ");
+  var o='<path d="'+d+'" fill="none" stroke="var(--sea)" stroke-width="2" stroke-dasharray="5 4"/>';
+  pts.forEach(function(p,i){o+='<circle cx="'+X(p).toFixed(1)+'" cy="'+Y(p).toFixed(1)+'" r="'+(i==0||i==pts.length-1?7:5)+'" fill="'+(i==0?"var(--ok)":"var(--accent)")+'"/><text x="'+(X(p)+9).toFixed(1)+'" y="'+(Y(p)+4).toFixed(1)+'" font-size="11" font-family="monospace" fill="currentColor">'+esc(p.code)+'</text>';});
+  svg.innerHTML=o;
+}
+
+function q(v){v=v==null?"":String(v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}
+function download(name,type,data){var a=document.createElement("a");a.href=data instanceof Blob?URL.createObjectURL(data):data;a.download=name;document.body.appendChild(a);a.click();a.remove();}
+var HEAD=["Code","Time","Latitude","Longitude","GPS accuracy (m)","Air (F)","Water (F)","Wind (mph)","Wind dir","Wave height (ft)","Quick note"];
+function baseRow(s){return[s.code,new Date(s.t).toISOString(),s.lat,s.lon,s.acc!=null?Math.round(s.acc):"",s.airF,s.waterF,s.windMph,compass(s.windDir),s.waveFt,s.note];}
+function fileBase(){return(S.swim||"swim").replace(/[^a-z0-9]+/gi,"-").toLowerCase();}
+$("csv").addEventListener("click",function(){
+  var t=[HEAD].concat(S.stops.map(baseRow)).map(function(r){return r.map(q).join(",");}).join("\n");
+  download(fileBase()+"-captures.csv","text/csv",new Blob([t],{type:"text/csv"}));
+});
+$("json").addEventListener("click",function(){download(fileBase()+"-backup.json","application/json",new Blob([JSON.stringify(S,null,2)],{type:"application/json"}));});
+$("clear").addEventListener("click",function(){if(confirm("Delete all stops on this device? Download a backup first.")){S.stops=[];S.written={};save();render();}});
+
+/* Reconcile */
+var photoURL=null;
+function renderRec(){
+  var h="";
+  if(!S.stops.length)h='<p class="meta">No stops to reconcile yet.</p>';
+  else{h='<table><tr><th>Code</th><th>Captured</th><th>Written on paper</th></tr>';
+    S.stops.forEach(function(s){h+='<tr><td class="c">'+esc(s.code)+'</td><td>'+esc(fmtTime(s.t)+" · "+chips(s).slice(1).join(", "))+'</td><td><textarea data-w="'+s.code+'" aria-label="Paper notes for '+s.code+'">'+esc(S.written[s.code]||"")+'</textarea></td></tr>';});
+    h+='</table>';}
+  $("recRows").innerHTML=h;
+  [].forEach.call($("recRows").querySelectorAll("textarea"),function(t){t.addEventListener("input",function(){S.written[t.dataset.w]=t.value;save();});});
+}
+$("photo").addEventListener("change",function(e){
+  var f=e.target.files[0];if(!f)return;
+  if(photoURL)URL.revokeObjectURL(photoURL);
+  photoURL=URL.createObjectURL(f);$("photoImg").src=photoURL;$("photoWrap").classList.remove("hide");
+});
+$("recCsv").addEventListener("click",function(){
+  var t=[HEAD.concat(["Written paper notes"])].concat(S.stops.map(function(s){return baseRow(s).concat([S.written[s.code]||""]);})).map(function(r){return r.map(q).join(",");}).join("\n");
+  download(fileBase()+"-reconciled.csv","text/csv",new Blob([t],{type:"text/csv"}));
+});
+function wrap(ctx,text,w){var out=[];String(text).split("\n").forEach(function(line){var cur="";line.split(" ").forEach(function(word){var t=cur?cur+" "+word:word;if(ctx.measureText(t).width>w&&cur){out.push(cur);cur=word;}else cur=t;});out.push(cur);});return out;}
+$("recPng").addEventListener("click",function(){
+  var W=1600,img=$("photoImg"),hasImg=photoURL&&img.naturalWidth,ih=hasImg?Math.round(img.naturalHeight*W/img.naturalWidth):0;
+  var m=document.createElement("canvas").getContext("2d");m.font="22px sans-serif";
+  var rows=S.stops.map(function(s){var cap=fmtTime(s.t)+"  "+chips(s).join("  |  ");return{s:s,cap:wrap(m,cap,W-260),wr:wrap(m,S.written[s.code]||"",W-260)};});
+  var th=110+rows.reduce(function(a,r){return a+30*(r.cap.length+r.wr.length)+34;},0);
+  var c=document.createElement("canvas");c.width=W;c.height=ih+th;var x=c.getContext("2d");
+  x.fillStyle="#fff";x.fillRect(0,0,W,c.height);
+  if(hasImg)x.drawImage(img,0,0,W,ih);
+  var y=ih+44;x.fillStyle="#0d2b3a";x.font="bold 30px Georgia,serif";
+  x.fillText("MASSOWSA reconciled log: "+(S.swim||"")+" | Swimmer: "+(S.swimmer||"")+" | Observer: "+(S.observer||""),24,y);y+=46;
+  rows.forEach(function(r){
+    x.strokeStyle="#d3dde2";x.beginPath();x.moveTo(24,y-24);x.lineTo(W-24,y-24);x.stroke();
+    x.fillStyle="#0b5d7a";x.font="bold 30px Courier New,monospace";x.fillText(r.s.code,24,y+4);
+    x.font="22px sans-serif";var ty=y;
+    x.fillStyle="#5b7280";r.cap.forEach(function(l){x.fillText(l,220,ty);ty+=30;});
+    x.fillStyle="#0d2b3a";r.wr.forEach(function(l){x.fillText(l,220,ty);ty+=30;});
+    y=ty+34;
+  });
+  c.toBlob(function(b){download(fileBase()+"-reconciled.png","image/png",b);});
+});
+
+[].forEach.call(document.querySelectorAll("nav button"),function(b){b.addEventListener("click",function(){
+  [].forEach.call(document.querySelectorAll("nav button"),function(x){x.setAttribute("aria-selected",x===b?"true":"false");});
+  $("tab-log").classList.toggle("hide",b.dataset.tab!=="log");$("tab-reconcile").classList.toggle("hide",b.dataset.tab!=="reconcile");
+});});
+
+render();
+})();
+</script>
+</body>
+</html>

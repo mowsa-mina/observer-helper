@@ -201,10 +201,12 @@ function openMeteo(lat,lon,t){
 function getWeather(lat,lon,t){
   t=Math.round(t||Date.now());
   var om=openMeteo(lat,lon,t).catch(function(){return{};});
-  var bu=helperFetch("/buoy?lat="+lat+"&lon="+lon+"&t="+t).catch(function(){return null;});
+  var bu=helperFetch("/buoy?lat="+lat+"&lon="+lon+"&t="+t).catch(function(e){return{err:String(e&&e.message||e)};});
   return Promise.all([om,bu]).then(function(r){
     var m=r[0]||{},b=(r[1]&&r[1].readings)||{};
     var w={airF:null,windMph:null,windDir:null,waterF:null,waveFt:null,wx:{}};
+    if(r[1]&&r[1].err)w.buoyNote="Buoy lookup did not work ("+r[1].err+")";
+    else if(r[1]&&!Object.keys(r[1].readings||{}).length)w.buoyNote="No buoy within 120 km had a reading within an hour of this stop";
     [["airF","air"],["waterF","water"],["windMph","wind"],["waveFt","waves"]].forEach(function(k){
       var f=b[k[0]],g=m[k[0]];
       if(f){
@@ -224,13 +226,14 @@ function fmtAge(m){
   return a<1?"at the time of this stop":a+" min "+(m<0?"before":"after")+" this stop";
 }
 function wxLines(s){
-  var w=s.wx;
-  if(!w)return s.src?["Source: "+s.src]:[];
-  var rows=[["air","Air",s.airF!=null?Math.round(s.airF)+"°F":null],["water","Water",s.waterF!=null?s.waterF.toFixed(1)+"°F":null],["wind","Wind",s.windMph!=null?Math.round(s.windMph)+" mph "+compass(s.windDir):null],["waves","Waves",s.waveFt!=null?s.waveFt.toFixed(1)+" ft":null]],out=[];
+  var w=s.wx||{},out=[];
+  if(!s.wx&&s.src)out.push("Source: "+s.src);
+  var rows=[["air","Air",s.airF!=null?Math.round(s.airF)+"°F":null],["water","Water",s.waterF!=null?s.waterF.toFixed(1)+"°F":null],["wind","Wind",s.windMph!=null?Math.round(s.windMph)+" mph "+compass(s.windDir):null],["waves","Waves",s.waveFt!=null?s.waveFt.toFixed(1)+" ft":null]];
   rows.forEach(function(r){
     var f=w[r[0]];
     if(f&&r[2])out.push(r[1]+" "+r[2]+": "+f.src+", reading from "+fmtTime(f.rt)+" ("+fmtAge(f.min)+")");
   });
+  if(s.buoyNote)out.push(s.buoyNote);
   return out;
 }
 function wxText(s){
@@ -272,6 +275,7 @@ $("fill").addEventListener("click",function(){
     [["airF","air"],["windMph","wind"],["waterF","water"],["waveFt","waves"]].forEach(function(k){
       if(s[k[0]]==null&&w[k[0]]!=null){s[k[0]]=w[k[0]];s.wx[k[1]]=w.wx[k[1]];did=true;if(k[0]==="windMph")s.windDir=w.windDir;}
     });
+    if(w.buoyNote)s.buoyNote=w.buoyNote;else delete s.buoyNote;
     if(did)filled++;
   });});});
   p.then(function(){save();render();status("Filled "+filled+" of "+todo.length+" stop(s). Each reading matches that stop's time; anything with no reading within an hour stays blank.","ok");});

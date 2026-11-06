@@ -76,7 +76,7 @@ nav button[aria-selected="true"]{background:var(--sea);color:var(--surface);bord
   <button class="mark" id="mark">Mark stop</button>
   <p id="status" role="status" aria-live="polite"></p>
   <div class="row">
-    <button id="fill">Fill in missing weather</button>
+    <button id="fill">Fill missing weather by stop time</button>
     <button id="csv">Download captures (CSV)</button>
     <button id="json">Backup (JSON)</button>
   </div>
@@ -177,22 +177,72 @@ function getJSON(url){
   var ctl=new AbortController(),t=setTimeout(function(){ctl.abort();},10000);
   return fetch(url,{signal:ctl.signal}).then(function(r){clearTimeout(t);if(!r.ok)throw new Error(r.status);return r.json();});
 }
-function getWeather(lat,lon){
-  var w={airF:null,windMph:null,windDir:null,waterF:null,waveFt:null};
-  var wx=getJSON("https://api.open-meteo.com/v1/forecast?latitude="+lat+"&longitude="+lon+"&current=temperature_2m,wind_speed_10m,wind_direction_10m&temperature_unit=fahrenheit&wind_speed_unit=mph")
-    .then(function(j){var c=j.current||{};w.airF=c.temperature_2m;w.windMph=c.wind_speed_10m;w.windDir=c.wind_direction_10m;}).catch(function(){});
-  var mr=getJSON("https://marine-api.open-meteo.com/v1/marine?latitude="+lat+"&longitude="+lon+"&current=sea_surface_temperature,wave_height&temperature_unit=fahrenheit&length_unit=imperial")
-    .then(function(j){var c=j.current||{};w.waterF=c.sea_surface_temperature;w.waveFt=c.wave_height;}).catch(function(){});
-  var bu=helperFetch("/buoy?lat="+lat+"&lon="+lon).catch(function(){return null;});
-  return Promise.all([wx,mr,bu]).then(function(r){
-    var b=r[2],src="Open-Meteo model";
-    if(b){
-      ["airF","windMph","windDir","waterF","waveFt"].forEach(function(k){if(b[k]!=null)w[k]=b[k];});
-      if(b.src)src=b.src+"; gaps filled by Open-Meteo model";
-    }
-    w.src=src;
+function omPick(h,key,t){
+  if(!h||!h[key])return null;
+  var best=null;
+  for(var i=0;i<h.time.length;i++){
+    var v=h[key][i];if(v==null)continue;
+    var rt=Date.parse(h.time[i]+"Z"),g=Math.abs(rt-t);
+    if(g<=3600e3&&(!best||g<best.g))best={v:v,rt:rt,g:g};
+  }
+  return best?{v:best.v,rt:best.rt,min:Math.round((best.rt-t)/60000)}:null;
+}
+function openMeteo(lat,lon,t){
+  var days=Math.min(92,Math.max(1,Math.ceil((Date.now()-t)/864e5)+1));
+  var base="latitude="+lat+"&longitude="+lon+"&timezone=UTC&past_days="+days+"&forecast_days=1";
+  var out={};
+  var a=getJSON("https://api.open-meteo.com/v1/forecast?"+base+"&hourly=temperature_2m,wind_speed_10m,wind_direction_10m&temperature_unit=fahrenheit&wind_speed_unit=mph")
+    .then(function(j){out.airF=omPick(j.hourly,"temperature_2m",t);out.windMph=omPick(j.hourly,"wind_speed_10m",t);out.windDir=omPick(j.hourly,"wind_direction_10m",t);}).catch(function(){});
+  var b=getJSON("https://marine-api.open-meteo.com/v1/marine?"+base+"&hourly=sea_surface_temperature,wave_height&temperature_unit=fahrenheit&length_unit=imperial")
+    .then(function(j){out.waterF=omPick(j.hourly,"sea_surface_temperature",t);out.waveFt=omPick(j.hourly,"wave_height",t);}).catch(function(){});
+  return Promise.all([a,b]).then(function(){return out;});
+}
+/* Readings are matched to the stop's own time t. Each one records where it came from and how far from t it was. */
+function getWeather(lat,lon,t){
+  t=Math.round(t||Date.now());
+  var om=openMeteo(lat,lon,t).catch(function(){return{};});
+  var bu=helperFetch("/buoy?lat="+lat+"&lon="+lon+"&t="+t).catch(function(){return null;});
+  return Promise.all([om,bu]).then(function(r){
+    var m=r[0]||{},b=(r[1]&&r[1].readings)||{};
+    var w={airF:null,windMph:null,windDir:null,waterF:null,waveFt:null,wx:{}};
+    [["airF","air"],["waterF","water"],["windMph","wind"],["waveFt","waves"]].forEach(function(k){
+      var f=b[k[0]],g=m[k[0]];
+      if(f){
+        w[k[0]]=f.v;if(k[0]==="windMph")w.windDir=f.dir;
+        w.wx[k[1]]={src:"NDBC "+f.id+(f.name?" "+f.name:"")+", "+f.km+" km",rt:f.t,min:f.min,kind:"buoy"};
+      }else if(g){
+        w[k[0]]=g.v;if(k[0]==="windMph"&&m.windDir)w.windDir=m.windDir.v;
+        w.wx[k[1]]={src:"Open-Meteo model (hourly)",rt:g.rt,min:g.min,kind:"model"};
+      }
+    });
     return w;
   });
+}
+function fmtAge(m){
+  if(m==null)return"";
+  var a=Math.abs(m);
+  return a<1?"at the time of this stop":a+" min "+(m<0?"before":"after")+" this stop";
+}
+function wxLines(s){
+  var w=s.wx;
+  if(!w)return s.src?["Source: "+s.src]:[];
+  var rows=[["air","Air",s.airF!=null?Math.round(s.airF)+"°F":null],["water","Water",s.waterF!=null?s.waterF.toFixed(1)+"°F":null],["wind","Wind",s.windMph!=null?Math.round(s.windMph)+" mph "+compass(s.windDir):null],["waves","Waves",s.waveFt!=null?s.waveFt.toFixed(1)+" ft":null]],out=[];
+  rows.forEach(function(r){
+    var f=w[r[0]];
+    if(f&&r[2])out.push(r[1]+" "+r[2]+": "+f.src+", reading from "+fmtTime(f.rt)+" ("+fmtAge(f.min)+")");
+  });
+  return out;
+}
+function wxText(s){
+  return wxLines(s).join("; ");
+}
+function wxCols(s){
+  var w=s.wx||{},o=[];
+  ["air","water","wind","waves"].forEach(function(k){
+    var f=w[k];
+    o.push(f?f.src+", reading from "+fmtTime(f.rt):"",f?f.min:"");
+  });
+  return o;
 }
 
 $("mark").addEventListener("click",function(){
@@ -204,7 +254,7 @@ $("mark").addEventListener("click",function(){
     if(!g){status("Stop "+stop.code+" saved. No GPS fix yet.","warn");return;}
     stop.lat=g.lat;stop.lon=g.lon;stop.acc=g.acc;save();focusCode=stop.code;render();
     status("Stop "+stop.code+" saved. Getting weather…","");
-    return getWeather(g.lat,g.lon).then(function(w){
+    return getWeather(g.lat,g.lon,stop.t).then(function(w){
       Object.assign(stop,w);save();focusCode=stop.code;render();
       var miss=stop.airF==null&&stop.waterF==null;
       status(miss?"Stop "+stop.code+" saved with GPS. Weather unavailable; use “Fill in missing weather” when you have signal.":"Stop "+stop.code+" saved with GPS and conditions.",miss?"warn":"ok");
@@ -213,12 +263,18 @@ $("mark").addEventListener("click",function(){
 });
 
 $("fill").addEventListener("click",function(){
-  var todo=S.stops.filter(function(s){return s.lat!=null&&(s.airF==null||s.waterF==null);});
+  var todo=S.stops.filter(function(s){return s.lat!=null&&(s.airF==null||s.waterF==null||s.windMph==null);});
   if(!todo.length){status("Nothing to fill in.","");return;}
-  status("Filling "+todo.length+" stop(s)…","");
-  var p=Promise.resolve();
-  todo.forEach(function(s){p=p.then(function(){return getWeather(s.lat,s.lon).then(function(w){["airF","windMph","windDir","waterF","waveFt"].forEach(function(k){if(s[k]==null)s[k]=w[k];});if(!s.src)s.src=w.src;});});});
-  p.then(function(){save();render();status("Done.","ok");});
+  status("Looking up readings for "+todo.length+" stop(s), matched to each stop's own time…","");
+  var p=Promise.resolve(),filled=0;
+  todo.forEach(function(s){p=p.then(function(){return getWeather(s.lat,s.lon,s.t).then(function(w){
+    var did=false;s.wx=s.wx||{};
+    [["airF","air"],["windMph","wind"],["waterF","water"],["waveFt","waves"]].forEach(function(k){
+      if(s[k[0]]==null&&w[k[0]]!=null){s[k[0]]=w[k[0]];s.wx[k[1]]=w.wx[k[1]];did=true;if(k[0]==="windMph")s.windDir=w.windDir;}
+    });
+    if(did)filled++;
+  });});});
+  p.then(function(){save();render();status("Filled "+filled+" of "+todo.length+" stop(s). Each reading matches that stop's time; anything with no reading within an hour stays blank.","ok");});
 });
 
 function chips(s){
@@ -234,7 +290,7 @@ function render(){
   $("count").textContent="("+S.stops.length+")";
   var h="";
   S.stops.slice().reverse().forEach(function(s){
-    h+='<div class="entry"><div class="code">'+esc(s.code)+'</div><div class="meta">'+new Date(s.t).toLocaleString()+'</div><div class="chips">'+chips(s).map(function(c){return'<span class="chip">'+esc(c)+'</span>';}).join("")+'</div><label for="n-'+s.code+'">Quick note (optional)</label><input id="n-'+s.code+'" data-code="'+s.code+'" value="'+esc(s.note)+'"></div>';
+    h+='<div class="entry"><div class="code">'+esc(s.code)+'</div><div class="meta">'+new Date(s.t).toLocaleString()+'</div><div class="chips">'+chips(s).map(function(c){return'<span class="chip">'+esc(c)+'</span>';}).join("")+'</div>'+wxLines(s).map(function(l){return'<div class="meta">'+esc(l)+'</div>';}).join("")+'<label for="n-'+s.code+'">Quick note (optional)</label><input id="n-'+s.code+'" data-code="'+s.code+'" value="'+esc(s.note)+'"></div>';
   });
   $("list").innerHTML=h||'<p class="meta">No stops yet. Tap “Mark stop” at your first check-in.</p>';
   [].forEach.call($("list").querySelectorAll("input[data-code]"),function(i){i.addEventListener("input",function(){var s=S.stops.filter(function(x){return x.code===i.dataset.code;})[0];s.note=i.value;save();});});
@@ -300,8 +356,8 @@ function plotSvg(){
 function q(v){v=v==null?"":String(v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}
 function download(name,type,data){var a=document.createElement("a");a.href=data instanceof Blob?URL.createObjectURL(data):data;a.download=name;document.body.appendChild(a);a.click();a.remove();}
 function localStamp(t){var d=new Date(t),p=function(n){return String(n).padStart(2,"0");};return d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate())+" "+p(d.getHours())+":"+p(d.getMinutes())+":"+p(d.getSeconds());}
-var HEAD=["Code","Local time","Time (UTC)","Latitude","Longitude","GPS accuracy (m)","Air (F)","Water (F)","Wind (mph)","Wind dir","Wave height (ft)","Quick note","Weather source"];
-function baseRow(s){return[s.code,localStamp(s.t),new Date(s.t).toISOString(),s.lat,s.lon,s.acc!=null?Math.round(s.acc):"",s.airF,s.waterF,s.windMph,compass(s.windDir),s.waveFt,s.note,s.src||""];}
+var HEAD=["Code","Local time","Time (UTC)","Latitude","Longitude","GPS accuracy (m)","Air (F)","Water (F)","Wind (mph)","Wind dir","Wave height (ft)","Quick note","Air source","Air reading vs stop (min)","Water source","Water reading vs stop (min)","Wind source","Wind reading vs stop (min)","Wave source","Wave reading vs stop (min)"];
+function baseRow(s){return[s.code,localStamp(s.t),new Date(s.t).toISOString(),s.lat,s.lon,s.acc!=null?Math.round(s.acc):"",s.airF,s.waterF,s.windMph,compass(s.windDir),s.waveFt,s.note].concat(wxCols(s));}
 function fileBase(){return(S.swim||"swim").replace(/[^a-z0-9]+/gi,"-").toLowerCase();}
 $("csv").addEventListener("click",function(){
   var t=[HEAD].concat(S.stops.map(baseRow)).map(function(r){return r.map(q).join(",");}).join("\n");
@@ -318,7 +374,7 @@ function renderRec(){
   else{h='<table><tr><th>Code</th><th>Captured</th><th>Written on paper</th></tr>';
     S.stops.forEach(function(s){
       var low=S.conf[s.code]==="low";
-      h+='<tr><td class="c">'+esc(s.code)+'</td><td>'+esc(fmtTime(s.t)+" · "+chips(s).slice(1).join(", "))+'</td><td>'+(low?'<div class="lowtag">Check this row against the photo</div>':'')+'<textarea class="'+(low?"low":"")+'" data-w="'+s.code+'" aria-label="Paper notes for '+s.code+'">'+esc(S.written[s.code]||"")+'</textarea></td></tr>';});
+      h+='<tr><td class="c">'+esc(s.code)+'</td><td>'+esc(fmtTime(s.t)+" · "+chips(s).slice(1).join(", "))+(s.note?'<br><em>Quick note: '+esc(s.note)+'</em>':'')+'</td><td>'+(low?'<div class="lowtag">Check this row against the photo</div>':'')+'<textarea class="'+(low?"low":"")+'" data-w="'+s.code+'" aria-label="Paper notes for '+s.code+'">'+esc(S.written[s.code]||"")+'</textarea></td></tr>';});
     h+='</table>';}
   $("recRows").innerHTML=h;
   [].forEach.call($("recRows").querySelectorAll("textarea"),function(t){t.addEventListener("input",function(){S.written[t.dataset.w]=t.value;if(S.conf[t.dataset.w]==="low"){S.conf[t.dataset.w]="edited";t.classList.remove("low");}save();});});
@@ -377,7 +433,7 @@ function wrap(ctx,text,w){var out=[];String(text).split("\n").forEach(function(l
 $("recPng").addEventListener("click",function(){
   var W=1600,img=$("photoImg"),hasImg=photoURL&&img.naturalWidth,ih=hasImg?Math.round(img.naturalHeight*W/img.naturalWidth):0;
   var m=document.createElement("canvas").getContext("2d");m.font="22px sans-serif";
-  var rows=S.stops.map(function(s){var cap=fmtTime(s.t)+"  "+chips(s).join("  |  ");return{s:s,cap:wrap(m,cap,W-260),wr:wrap(m,S.written[s.code]||"",W-260)};});
+  var rows=S.stops.map(function(s){var cap=fmtTime(s.t)+"  "+chips(s).join("  |  ");return{s:s,cap:wrap(m,cap,W-260),wr:wrap(m,[S.written[s.code]||"",s.note?"Quick note: "+s.note:""].filter(Boolean).join("\n"),W-260)};});
   var th=110+rows.reduce(function(a,r){return a+30*(r.cap.length+r.wr.length)+34;},0);
   var c=document.createElement("canvas");c.width=W;c.height=ih+th;var x=c.getContext("2d");
   x.fillStyle="#fff";x.fillRect(0,0,W,c.height);
@@ -404,7 +460,7 @@ $("recPng").addEventListener("click",function(){
 
 /* Standalone map page: one file the office can open, share or archive */
 function mapPage(){
-  var pts=S.stops.map(function(s){return{code:s.code,t:new Date(s.t).toLocaleString(),tl:fmtTime(s.t),lat:s.lat,lon:s.lon,cond:chips(s).slice(1).join(", "),src:s.src||"",note:s.note||"",paper:S.written[s.code]||""};});
+  var pts=S.stops.map(function(s){return{code:s.code,t:new Date(s.t).toLocaleString(),tl:fmtTime(s.t),lat:s.lat,lon:s.lon,cond:chips(s).slice(1).join(", "),src:wxText(s),note:s.note||"",paper:S.written[s.code]||""};});
   var title="MASSOWSA swim map"+(S.swim?": "+S.swim:"");
   var data=JSON.stringify({title:title,swimmer:S.swimmer||"",observer:S.observer||"",pts:pts}).replace(/</g,"\\u003c");
   return '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>'+esc(title)+'</title>'
@@ -416,7 +472,7 @@ function mapPage(){
   +'function e(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",\'"\':"&quot;"}[c];});}'
   +'document.getElementById("t").textContent=D.title;document.getElementById("p").textContent=[D.swimmer&&"Swimmer: "+D.swimmer,D.observer&&"Observer: "+D.observer,D.pts.length+" stops"].filter(Boolean).join("  |  ");'
   +'var h="<tr><th>Code</th><th>Time</th><th>Position and conditions</th><th>Observer notes</th></tr>";'
-  +'D.pts.forEach(function(p){h+="<tr><td class=c>"+e(p.code)+"</td><td>"+e(p.t)+"</td><td>"+(p.lat!=null?e(p.lat.toFixed(5)+", "+p.lon.toFixed(5))+"<br>":"No GPS<br>")+e(p.cond)+(p.src?"<br><small>"+e(p.src)+"</small>":"")+"</td><td>"+e(p.paper||p.note).replace(/\\n/g,"<br>")+"</td></tr>";});'
+  +'D.pts.forEach(function(p){h+="<tr><td class=c>"+e(p.code)+"</td><td>"+e(p.t)+"</td><td>"+(p.lat!=null?e(p.lat.toFixed(5)+", "+p.lon.toFixed(5))+"<br>":"No GPS<br>")+e(p.cond)+(p.src?"<br><small>"+e(p.src)+"</small>":"")+"</td><td>"+e((p.paper||"")+(p.paper&&p.note?"\\n":"")+(p.note?"Quick note: "+p.note:"")).replace(/\\n/g,"<br>")+"</td></tr>";});'
   +'document.getElementById("tb").innerHTML=h;'
   +'var g=D.pts.filter(function(p){return p.lat!=null;});var m=L.map("m");L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,attribution:"\\u00a9 OpenStreetMap contributors"}).addTo(m);'
   +'if(g.length){var ll=g.map(function(p){return[p.lat,p.lon];});L.polyline(ll,{color:"#0b5d7a",weight:3,dashArray:"6 6"}).addTo(m);'

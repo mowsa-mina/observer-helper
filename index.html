@@ -3,7 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>MASSOWSA Observer Log</title>
+<title>MOWSA Observer Helper</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
 <style>
 :root{--bg:#f3f6f7;--surface:#fff;--ink:#0d2b3a;--mute:#5b7280;--line:#d3dde2;--accent:#e8590c;--accent-ink:#fff;--sea:#0b5d7a;--ok:#1b7a4b;--bad:#b3261e}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#071a24;--surface:#0e2735;--ink:#e6f1f5;--mute:#8fa9b6;--line:#1f4254;--accent:#ff7a2e;--accent-ink:#1a0a00;--sea:#5cc2e3;--ok:#5ad39a;--bad:#ff8a80}}
@@ -39,6 +41,13 @@ td.c{font:700 1rem "Courier New",monospace;color:var(--sea);white-space:nowrap}
 #photoWrap{overflow:auto;max-height:50vh;border:1px solid var(--line);border-radius:8px;margin:10px 0}
 #photoWrap img{max-width:none;width:100%;display:block}
 .hide{display:none}
+#map,#map2{height:300px;border:1px solid var(--line);border-radius:8px;margin-bottom:10px;z-index:0}
+.leaflet-tooltip{font:700 12px "Courier New",monospace}
+details summary{cursor:pointer}
+button:disabled{opacity:.5;cursor:not-allowed}
+textarea.low{border-color:var(--bad);border-width:2px}
+.lowtag{color:var(--bad);font-size:.8rem;font-weight:600}
+.unm{border:1px solid var(--bad);border-radius:8px;padding:8px 10px;margin:10px 0;font-size:.9rem}
 nav{display:flex;gap:6px;margin-bottom:14px}
 nav button{flex:1}
 nav button[aria-selected="true"]{background:var(--sea);color:var(--surface);border-color:var(--sea)}
@@ -46,11 +55,11 @@ nav button[aria-selected="true"]{background:var(--sea);color:var(--surface);bord
 </head>
 <body>
 <main>
-<h1>MASSOWSA observer log</h1>
-<p class="sub">Mark each stop with one tap. Write the code in your paper log so we can match everything later.</p>
+<h1>MOWSA Observer Helper</h1>
+<p class="sub">Mark each stop with one tap and write its code in your paper log. After the swim, the Final Record matches your paper notes to the captured data.</p>
 <nav role="tablist">
-  <button role="tab" aria-selected="true" data-tab="log">Log</button>
-  <button role="tab" aria-selected="false" data-tab="reconcile">Reconcile</button>
+  <button role="tab" aria-selected="true" data-tab="log">Live Log</button>
+  <button role="tab" aria-selected="false" data-tab="final">Final Record</button>
 </nav>
 
 <div id="tab-log">
@@ -61,6 +70,15 @@ nav button[aria-selected="true"]{background:var(--sea);color:var(--surface);bord
     <div><label for="swimmer">Swimmer</label><input id="swimmer"></div>
     <div><label for="observer">Observer</label><input id="observer"></div>
   </div>
+</section>
+
+<section>
+  <details id="helperBox">
+    <summary><strong>Helper connection</strong> <span id="helperState" class="meta"></span></summary>
+    <p class="meta">Enables NOAA buoy readings and automatic reading of the paper log. Your coordinator gives you the address and passcode once.</p>
+    <label for="helperUrl">Helper address</label><input id="helperUrl" type="url" placeholder="https://massowsa-helper.yourname.workers.dev" autocapitalize="off" autocorrect="off">
+    <label for="helperKey">Passcode</label><input id="helperKey" type="password" autocomplete="off">
+  </details>
 </section>
 
 <section>
@@ -75,23 +93,43 @@ nav button[aria-selected="true"]{background:var(--sea);color:var(--surface);bord
 
 <section>
   <h2>Stops <span id="count" class="meta"></span></h2>
-  <svg id="track" viewBox="0 0 400 220" role="img" aria-label="Plot of stop locations"></svg>
+  <div id="map" role="region" aria-label="Map of stops"></div>
+  <svg id="track" class="hide" viewBox="0 0 400 220" role="img" aria-label="Plot of stop locations"></svg>
   <div id="list"></div>
-  <div class="row"><button id="clear">Clear all stops</button></div>
+  <div class="row"><button class="mapBtn">Download map page (HTML)</button><button id="clear">Clear all stops</button></div>
 </section>
 </div>
 
-<div id="tab-reconcile" class="hide">
+<div id="tab-final" class="hide">
 <section>
-  <h2>Reconcile with paper log</h2>
-  <p class="sub">Photograph the paper form after the swim. Read each row’s code on the photo and type what it says beside the matching code. Then export.</p>
+  <h2>Paper log</h2>
+  <p class="sub">Photograph the paper form after the swim, then tap “Read paper log”. Each row is matched to its code and filled in below. Check anything flagged and fix mistakes.</p>
   <label for="photo">Photo of paper log</label>
-  <input id="photo" type="file" accept="image/*" capture="environment">
+  <input id="photo" type="file" accept="image/*">
   <div id="photoWrap" class="hide"><img id="photoImg" alt="Paper observer log"></div>
+  <div class="row"><button id="readBtn" class="mark" style="font-size:1.1rem;padding:16px 10px" disabled>Read paper log</button></div>
+  <p id="recStatus" role="status" aria-live="polite" class="meta"></p>
+  <div id="unmatched"></div>
+</section>
+
+<section>
+  <h2>Stop data</h2>
   <div id="recRows"></div>
+</section>
+
+<section>
+  <h2>Map of all stops</h2>
+  <div id="map2" role="region" aria-label="Map of all stops"></div>
+  <p id="map2note" class="meta hide">The map needs a data connection. The map page you download shows it once you are online.</p>
+</section>
+
+<section>
+  <h2>Export the final record</h2>
   <div class="row">
-    <button id="recCsv">Download reconciled spreadsheet (CSV)</button>
-    <button id="recPng">Download reconciled image (PNG)</button>
+    <button id="recCsv">Download final spreadsheet (CSV)</button>
+    <button id="recPng">Download paper log with data (PNG)</button>
+    <button class="mapBtn">Download map page (HTML)</button>
+    <button id="exportAll">Export everything</button>
   </div>
 </section>
 </div>
@@ -100,9 +138,23 @@ nav button[aria-selected="true"]{background:var(--sea);color:var(--surface);bord
 <script>
 (function(){
 var KEY="massowsa-observer-v1", ALPHA="ACDEFGHJKLMNPQRTUVWXY34679";
-var S={swim:"",swimmer:"",observer:"",stops:[],written:{}};
+var S={swim:"",swimmer:"",observer:"",stops:[],written:{},conf:{},unmatched:[]};
 try{var raw=localStorage.getItem(KEY);if(raw)S=Object.assign(S,JSON.parse(raw));}catch(e){}
 function save(){try{localStorage.setItem(KEY,JSON.stringify(S));}catch(e){}}
+/* Helper settings live apart from swim data so the passcode never lands in backups */
+var HKEY="massowsa-helper-v1",H={url:"",key:""};
+try{var hraw=localStorage.getItem(HKEY);if(hraw)H=Object.assign(H,JSON.parse(hraw));}catch(e){}
+function saveH(){try{localStorage.setItem(HKEY,JSON.stringify(H));}catch(e){}}
+function helperOn(){return !!(H.url&&H.key);}
+function helperFetch(path,opts){
+  opts=opts||{};opts.headers=Object.assign({"X-Access-Key":H.key},opts.headers||{});
+  return fetch(H.url.replace(/\/+$/,"")+path,opts).then(function(r){
+    return r.json().catch(function(){return{};}).then(function(j){
+      if(!r.ok)throw new Error(j.error||("Helper error "+r.status));
+      return j;
+    });
+  });
+}
 function $(id){return document.getElementById(id);}
 function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];});}
 function newCode(){var c;do{c="";for(var i=0;i<5;i++)c+=ALPHA[Math.floor(Math.random()*ALPHA.length)];}while(S.stops.some(function(s){return s.code===c;}));return c;}
@@ -114,6 +166,13 @@ function status(m,cls){var e=$("status");e.textContent=m;e.className=cls||"";}
   $(k).value=S[k]||"";
   $(k).addEventListener("input",function(){S[k]=$(k).value;save();});
 });
+function helperUI(){
+  $("helperState").textContent=helperOn()?"(connected)":"(not set up)";
+  $("readBtn").disabled=!(helperOn()&&photoURL&&S.stops.length);
+}
+$("helperUrl").value=H.url;$("helperKey").value=H.key;
+$("helperUrl").addEventListener("input",function(){H.url=$("helperUrl").value.trim();saveH();helperUI();});
+$("helperKey").addEventListener("input",function(){H.key=$("helperKey").value.trim();saveH();helperUI();});
 
 function getGPS(){
   return new Promise(function(res){
@@ -131,7 +190,17 @@ function getWeather(lat,lon){
     .then(function(j){var c=j.current||{};w.airF=c.temperature_2m;w.windMph=c.wind_speed_10m;w.windDir=c.wind_direction_10m;}).catch(function(){});
   var mr=getJSON("https://marine-api.open-meteo.com/v1/marine?latitude="+lat+"&longitude="+lon+"&current=sea_surface_temperature,wave_height&temperature_unit=fahrenheit&length_unit=imperial")
     .then(function(j){var c=j.current||{};w.waterF=c.sea_surface_temperature;w.waveFt=c.wave_height;}).catch(function(){});
-  return Promise.all([wx,mr]).then(function(){return w;});
+  var bu=Promise.resolve(null);
+  if(helperOn())bu=helperFetch("/buoy?lat="+lat+"&lon="+lon).catch(function(){return null;});
+  return Promise.all([wx,mr,bu]).then(function(r){
+    var b=r[2],src="Open-Meteo model";
+    if(b){
+      ["airF","windMph","windDir","waterF","waveFt"].forEach(function(k){if(b[k]!=null)w[k]=b[k];});
+      if(b.src)src=b.src+"; gaps filled by Open-Meteo model";
+    }
+    w.src=src;
+    return w;
+  });
 }
 
 $("mark").addEventListener("click",function(){
@@ -141,10 +210,10 @@ $("mark").addEventListener("click",function(){
   if(navigator.vibrate)navigator.vibrate(60);
   getGPS().then(function(g){
     if(!g){status("Stop "+stop.code+" saved. No GPS fix yet.","warn");return;}
-    stop.lat=g.lat;stop.lon=g.lon;stop.acc=g.acc;save();render();
+    stop.lat=g.lat;stop.lon=g.lon;stop.acc=g.acc;save();focusCode=stop.code;render();
     status("Stop "+stop.code+" saved. Getting weather…","");
     return getWeather(g.lat,g.lon).then(function(w){
-      Object.assign(stop,w);save();render();
+      Object.assign(stop,w);save();focusCode=stop.code;render();
       var miss=stop.airF==null&&stop.waterF==null;
       status(miss?"Stop "+stop.code+" saved with GPS. Weather unavailable; use “Fill in missing weather” when you have signal.":"Stop "+stop.code+" saved with GPS and conditions.",miss?"warn":"ok");
     });
@@ -156,7 +225,7 @@ $("fill").addEventListener("click",function(){
   if(!todo.length){status("Nothing to fill in.","");return;}
   status("Filling "+todo.length+" stop(s)…","");
   var p=Promise.resolve();
-  todo.forEach(function(s){p=p.then(function(){return getWeather(s.lat,s.lon).then(function(w){["airF","windMph","windDir","waterF","waveFt"].forEach(function(k){if(s[k]==null)s[k]=w[k];});});});});
+  todo.forEach(function(s){p=p.then(function(){return getWeather(s.lat,s.lon).then(function(w){["airF","windMph","windDir","waterF","waveFt"].forEach(function(k){if(s[k]==null)s[k]=w[k];});if(!s.src)s.src=w.src;});});});
   p.then(function(){save();render();status("Done.","ok");});
 });
 
@@ -179,7 +248,50 @@ function render(){
   [].forEach.call($("list").querySelectorAll("input[data-code]"),function(i){i.addEventListener("input",function(){var s=S.stops.filter(function(x){return x.code===i.dataset.code;})[0];s.note=i.value;save();});});
   plot();renderRec();
 }
+var map=null,layer=null,focusCode=null,map2=null,layer2=null;
+function popupHtml(s){return"<strong>"+esc(s.code)+"</strong><br>"+esc(new Date(s.t).toLocaleString())+"<br>"+esc(chips(s).slice(1).join(", "))+(s.note?"<br>"+esc(s.note):"")+(S.written[s.code]?"<br>"+esc(S.written[s.code]):"");}
+function initMap(id){
+  var m=L.map(id);
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,attribution:"© OpenStreetMap contributors"}).addTo(m);
+  var g=L.layerGroup().addTo(m);m.setView([42.3,-71],8);
+  return{m:m,g:g};
+}
+function drawStops(m,g,focus){
+  var pts=S.stops.filter(function(s){return s.lat!=null;});
+  g.clearLayers();
+  if(!pts.length)return;
+  var ll=pts.map(function(p){return[p.lat,p.lon];});
+  L.polyline(ll,{color:"#0b5d7a",weight:3,dashArray:"6 6"}).addTo(g);
+  pts.forEach(function(p,i){
+    var mk=L.circleMarker([p.lat,p.lon],{radius:i===pts.length-1?10:7,color:"#fff",weight:2,fillColor:i===0?"#1b7a4b":"#e8590c",fillOpacity:1}).addTo(g);
+    mk.bindTooltip(p.code+"<br>"+fmtTime(p.t),{permanent:true,direction:"right",offset:[8,0]});
+    mk.bindPopup(popupHtml(p));
+    if(focus&&p.code===focus)mk.openPopup();
+  });
+  var f=focus&&pts.filter(function(p){return p.code===focus;})[0];
+  if(f)m.setView([f.lat,f.lon],Math.max(m.getZoom(),14));
+  else m.fitBounds(ll,{padding:[30,30],maxZoom:15});
+}
+function plotMap(focus){
+  if(!map){var a=initMap("map");map=a.m;layer=a.g;}
+  drawStops(map,layer,focus);
+}
+function plotFinalMap(){
+  var ok=!!window.L;
+  $("map2").classList.toggle("hide",!ok);$("map2note").classList.toggle("hide",ok);
+  if(!ok)return;
+  if(!map2){var a=initMap("map2");map2=a.m;layer2=a.g;}
+  map2.invalidateSize();
+  drawStops(map2,layer2,null);
+}
 function plot(){
+  var useMap=!!window.L;
+  $("map").classList.toggle("hide",!useMap);$("track").classList.toggle("hide",useMap);
+  if(useMap)plotMap(focusCode);else plotSvg();
+  focusCode=null;
+  if(!$("tab-final").classList.contains("hide"))plotFinalMap();
+}
+function plotSvg(){
   var pts=S.stops.filter(function(s){return s.lat!=null;}),svg=$("track");
   if(!pts.length){svg.innerHTML='<text x="200" y="115" text-anchor="middle" fill="currentColor" opacity=".5" font-size="13">Stops with GPS will plot here</text>';return;}
   var la=pts.map(function(p){return p.lat;}),lo=pts.map(function(p){return p.lon;});
@@ -195,15 +307,15 @@ function plot(){
 
 function q(v){v=v==null?"":String(v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}
 function download(name,type,data){var a=document.createElement("a");a.href=data instanceof Blob?URL.createObjectURL(data):data;a.download=name;document.body.appendChild(a);a.click();a.remove();}
-var HEAD=["Code","Time","Latitude","Longitude","GPS accuracy (m)","Air (F)","Water (F)","Wind (mph)","Wind dir","Wave height (ft)","Quick note"];
-function baseRow(s){return[s.code,new Date(s.t).toISOString(),s.lat,s.lon,s.acc!=null?Math.round(s.acc):"",s.airF,s.waterF,s.windMph,compass(s.windDir),s.waveFt,s.note];}
+var HEAD=["Code","Time","Latitude","Longitude","GPS accuracy (m)","Air (F)","Water (F)","Wind (mph)","Wind dir","Wave height (ft)","Quick note","Weather source"];
+function baseRow(s){return[s.code,new Date(s.t).toISOString(),s.lat,s.lon,s.acc!=null?Math.round(s.acc):"",s.airF,s.waterF,s.windMph,compass(s.windDir),s.waveFt,s.note,s.src||""];}
 function fileBase(){return(S.swim||"swim").replace(/[^a-z0-9]+/gi,"-").toLowerCase();}
 $("csv").addEventListener("click",function(){
   var t=[HEAD].concat(S.stops.map(baseRow)).map(function(r){return r.map(q).join(",");}).join("\n");
   download(fileBase()+"-captures.csv","text/csv",new Blob([t],{type:"text/csv"}));
 });
 $("json").addEventListener("click",function(){download(fileBase()+"-backup.json","application/json",new Blob([JSON.stringify(S,null,2)],{type:"application/json"}));});
-$("clear").addEventListener("click",function(){if(confirm("Delete all stops on this device? Download a backup first.")){S.stops=[];S.written={};save();render();}});
+$("clear").addEventListener("click",function(){if(confirm("Delete all stops on this device? Download a backup first.")){S.stops=[];S.written={};S.conf={};S.unmatched=[];save();render();}});
 
 /* Reconcile */
 var photoURL=null;
@@ -211,18 +323,61 @@ function renderRec(){
   var h="";
   if(!S.stops.length)h='<p class="meta">No stops to reconcile yet.</p>';
   else{h='<table><tr><th>Code</th><th>Captured</th><th>Written on paper</th></tr>';
-    S.stops.forEach(function(s){h+='<tr><td class="c">'+esc(s.code)+'</td><td>'+esc(fmtTime(s.t)+" · "+chips(s).slice(1).join(", "))+'</td><td><textarea data-w="'+s.code+'" aria-label="Paper notes for '+s.code+'">'+esc(S.written[s.code]||"")+'</textarea></td></tr>';});
+    S.stops.forEach(function(s){
+      var low=S.conf[s.code]==="low";
+      h+='<tr><td class="c">'+esc(s.code)+'</td><td>'+esc(fmtTime(s.t)+" · "+chips(s).slice(1).join(", "))+'</td><td>'+(low?'<div class="lowtag">Check this row against the photo</div>':'')+'<textarea class="'+(low?"low":"")+'" data-w="'+s.code+'" aria-label="Paper notes for '+s.code+'">'+esc(S.written[s.code]||"")+'</textarea></td></tr>';});
     h+='</table>';}
   $("recRows").innerHTML=h;
-  [].forEach.call($("recRows").querySelectorAll("textarea"),function(t){t.addEventListener("input",function(){S.written[t.dataset.w]=t.value;save();});});
+  [].forEach.call($("recRows").querySelectorAll("textarea"),function(t){t.addEventListener("input",function(){S.written[t.dataset.w]=t.value;if(S.conf[t.dataset.w]==="low"){S.conf[t.dataset.w]="edited";t.classList.remove("low");}save();});});
+  var u=S.unmatched||[];
+  $("unmatched").innerHTML=u.length?'<div class="unm"><strong>Codes on the form that match no stop:</strong> '+u.map(esc).join(", ")+'<br>The code may be misread or from a different swim. Compare with the photo.</div>':"";
 }
+/* Shrink the photo so it uploads quickly on a boat-side connection */
+function shrink(url,max){
+  return new Promise(function(res,rej){
+    var im=new Image();
+    im.onload=function(){
+      var k=Math.min(1,max/Math.max(im.naturalWidth,im.naturalHeight)),c=document.createElement("canvas");
+      c.width=Math.round(im.naturalWidth*k);c.height=Math.round(im.naturalHeight*k);
+      c.getContext("2d").drawImage(im,0,0,c.width,c.height);
+      res(c.toDataURL("image/jpeg",0.88).split(",")[1]);
+    };
+    im.onerror=function(){rej(new Error("Could not open that photo"));};
+    im.src=url;
+  });
+}
+function recStatus(m,cls){var e=$("recStatus");e.textContent=m;e.className="meta "+(cls||"");}
 $("photo").addEventListener("change",function(e){
   var f=e.target.files[0];if(!f)return;
   if(photoURL)URL.revokeObjectURL(photoURL);
   photoURL=URL.createObjectURL(f);$("photoImg").src=photoURL;$("photoWrap").classList.remove("hide");
+  helperUI();
+  recStatus(helperOn()?"Photo ready. Tap “Read paper log”.":"Photo added. To read it automatically, open Helper connection on the Live Log tab.", "");
+});
+$("readBtn").addEventListener("click",function(){
+  if(!helperOn()||!photoURL||!S.stops.length)return;
+  var btn=$("readBtn");btn.disabled=true;recStatus("Reading the form… this takes about 20–40 seconds.","");
+  shrink(photoURL,2000).then(function(b64){
+    return helperFetch("/reconcile",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({image:b64,codes:S.stops.map(function(s){return s.code;})})});
+  }).then(function(r){
+    var found=0,low=0;
+    (r.rows||[]).forEach(function(row){
+      if(!S.stops.some(function(s){return s.code===row.code;}))return;
+      /* never overwrite text the observer already typed or corrected */
+      if(S.written[row.code]&&S.conf[row.code]!=="low"&&S.conf[row.code]!=="ai")return;
+      S.written[row.code]=row.text||"";
+      S.conf[row.code]=(row.confidence==="low"||!row.text)?"low":"ai";
+      if(row.text)found++;
+      if(S.conf[row.code]==="low")low++;
+    });
+    S.unmatched=r.unmatched||[];save();renderRec();
+    recStatus("Matched "+found+" of "+S.stops.length+" stops."+(low?" "+low+" flagged in red for a second look.":"")+" Review, then export.","ok");
+  }).catch(function(err){
+    recStatus(err.message+". Check your connection and the helper settings, then try again. You can still type notes by hand.","warn");
+  }).then(function(){helperUI();});
 });
 $("recCsv").addEventListener("click",function(){
-  var t=[HEAD.concat(["Written paper notes"])].concat(S.stops.map(function(s){return baseRow(s).concat([S.written[s.code]||""]);})).map(function(r){return r.map(q).join(",");}).join("\n");
+  var t=[HEAD.concat(["Written paper notes","Paper read check"])].concat(S.stops.map(function(s){var c=S.conf[s.code];return baseRow(s).concat([S.written[s.code]||"",c==="low"?"needs review":(c==="ai"?"read by AI":(c==="edited"?"edited by observer":(S.written[s.code]?"typed":"")))]);})).map(function(r){return r.map(q).join(",");}).join("\n");
   download(fileBase()+"-reconciled.csv","text/csv",new Blob([t],{type:"text/csv"}));
 });
 function wrap(ctx,text,w){var out=[];String(text).split("\n").forEach(function(line){var cur="";line.split(" ").forEach(function(word){var t=cur?cur+" "+word:word;if(ctx.measureText(t).width>w&&cur){out.push(cur);cur=word;}else cur=t;});out.push(cur);});return out;}
@@ -249,10 +404,45 @@ $("recPng").addEventListener("click",function(){
 
 [].forEach.call(document.querySelectorAll("nav button"),function(b){b.addEventListener("click",function(){
   [].forEach.call(document.querySelectorAll("nav button"),function(x){x.setAttribute("aria-selected",x===b?"true":"false");});
-  $("tab-log").classList.toggle("hide",b.dataset.tab!=="log");$("tab-reconcile").classList.toggle("hide",b.dataset.tab!=="reconcile");
+  $("tab-log").classList.toggle("hide",b.dataset.tab!=="log");$("tab-final").classList.toggle("hide",b.dataset.tab!=="final");
+  if(b.dataset.tab==="log"&&map)setTimeout(function(){map.invalidateSize();},50);
+  if(b.dataset.tab==="final")plotFinalMap();
 });});
 
-render();
+/* Standalone map page: one file the office can open, share or archive */
+function mapPage(){
+  var pts=S.stops.map(function(s){return{code:s.code,t:new Date(s.t).toLocaleString(),tl:fmtTime(s.t),lat:s.lat,lon:s.lon,cond:chips(s).slice(1).join(", "),src:s.src||"",note:s.note||"",paper:S.written[s.code]||""};});
+  var title="MASSOWSA swim map"+(S.swim?": "+S.swim:"");
+  var data=JSON.stringify({title:title,swimmer:S.swimmer||"",observer:S.observer||"",pts:pts}).replace(/</g,"\\u003c");
+  return '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>'+esc(title)+'</title>'
+  +'<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">'
+  +'<style>body{margin:0;font:15px/1.45 system-ui,sans-serif;color:#0d2b3a}header{padding:14px 16px}h1{font:700 1.3rem Georgia,serif;margin:0}header p{margin:2px 0 0;color:#5b7280}#m{height:62vh;min-height:320px}table{border-collapse:collapse;width:100%}td,th{border-top:1px solid #d3dde2;padding:7px 10px;text-align:left;vertical-align:top}td.c{font:700 1rem "Courier New",monospace;color:#0b5d7a;white-space:nowrap}.wrap{padding:8px 6px 24px;overflow-x:auto}.leaflet-tooltip{font:700 12px "Courier New",monospace}</style></head><body>'
+  +'<header><h1 id="t"></h1><p id="p"></p></header><div id="m"></div><div class="wrap"><table id="tb"></table></div>'
+  +'<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"><\/script>'
+  +'<script>var D='+data+';'
+  +'function e(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",\'"\':"&quot;"}[c];});}'
+  +'document.getElementById("t").textContent=D.title;document.getElementById("p").textContent=[D.swimmer&&"Swimmer: "+D.swimmer,D.observer&&"Observer: "+D.observer,D.pts.length+" stops"].filter(Boolean).join("  |  ");'
+  +'var h="<tr><th>Code</th><th>Time</th><th>Position and conditions</th><th>Observer notes</th></tr>";'
+  +'D.pts.forEach(function(p){h+="<tr><td class=c>"+e(p.code)+"</td><td>"+e(p.t)+"</td><td>"+(p.lat!=null?e(p.lat.toFixed(5)+", "+p.lon.toFixed(5))+"<br>":"No GPS<br>")+e(p.cond)+(p.src?"<br><small>"+e(p.src)+"</small>":"")+"</td><td>"+e(p.paper||p.note).replace(/\\n/g,"<br>")+"</td></tr>";});'
+  +'document.getElementById("tb").innerHTML=h;'
+  +'var g=D.pts.filter(function(p){return p.lat!=null;});var m=L.map("m");L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,attribution:"\\u00a9 OpenStreetMap contributors"}).addTo(m);'
+  +'if(g.length){var ll=g.map(function(p){return[p.lat,p.lon];});L.polyline(ll,{color:"#0b5d7a",weight:3,dashArray:"6 6"}).addTo(m);'
+  +'g.forEach(function(p,i){var k=L.circleMarker([p.lat,p.lon],{radius:i==g.length-1?10:7,color:"#fff",weight:2,fillColor:i==0?"#1b7a4b":"#e8590c",fillOpacity:1}).addTo(m);k.bindTooltip(p.code+"<br>"+p.tl,{permanent:true,direction:"right",offset:[8,0]});k.bindPopup("<b>"+e(p.code)+"</b><br>"+e(p.t)+"<br>"+e(p.cond)+(p.paper?"<br>"+e(p.paper):""));});m.fitBounds(ll,{padding:[30,30],maxZoom:15});}else m.setView([42.3,-71],8);'
+  +'<\/script></body></html>';
+}
+[].forEach.call(document.querySelectorAll(".mapBtn"),function(b){b.addEventListener("click",function(){
+  if(!S.stops.length){return;}
+  download(fileBase()+"-map.html","text/html",new Blob([mapPage()],{type:"text/html"}));
+});});
+$("exportAll").addEventListener("click",function(){
+  if(!S.stops.length)return;
+  $("recCsv").click();
+  setTimeout(function(){$("recPng").click();},500);
+  setTimeout(function(){document.querySelector(".mapBtn").click();},1000);
+  recStatus("Exporting the spreadsheet, image and map page. If your browser asks, allow multiple downloads.","ok");
+});
+
+render();helperUI();
 })();
 </script>
 </body>

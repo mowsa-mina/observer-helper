@@ -44,6 +44,8 @@ td.c{font:700 1rem "Courier New",monospace;color:var(--sea);white-space:nowrap}
 #map,#map2{height:300px;border:1px solid var(--line);border-radius:8px;margin-bottom:10px;z-index:0}
 .leaflet-tooltip{font:700 12px "Courier New",monospace}
 details summary{cursor:pointer}
+details.src{margin:2px 0 6px}
+details.src summary{color:var(--mute);font-size:.88rem;padding:4px 0}
 button:disabled{opacity:.5;cursor:not-allowed}
 textarea.low{border-color:var(--bad);border-width:2px}
 .lowtag{color:var(--bad);font-size:.8rem;font-weight:600}
@@ -236,6 +238,12 @@ function wxLines(s){
   if(s.buoyNote)out.push(s.buoyNote);
   return out;
 }
+var openSrc={};
+function srcBlock(s){
+  var L=wxLines(s);
+  if(!L.length)return"";
+  return'<details class="src" data-code="'+s.code+'"'+(openSrc[s.code]?" open":"")+'><summary>Sources and reading times'+(s.buoyNote?" (buoy data missing)":"")+'</summary>'+L.map(function(l){return'<div class="meta">'+esc(l)+'</div>';}).join("")+'</details>';
+}
 function wxText(s){
   return wxLines(s).join("; ");
 }
@@ -294,10 +302,11 @@ function render(){
   $("count").textContent="("+S.stops.length+")";
   var h="";
   S.stops.slice().reverse().forEach(function(s){
-    h+='<div class="entry"><div class="code">'+esc(s.code)+'</div><div class="meta">'+new Date(s.t).toLocaleString()+'</div><div class="chips">'+chips(s).map(function(c){return'<span class="chip">'+esc(c)+'</span>';}).join("")+'</div>'+wxLines(s).map(function(l){return'<div class="meta">'+esc(l)+'</div>';}).join("")+'<label for="n-'+s.code+'">Quick note (optional)</label><input id="n-'+s.code+'" data-code="'+s.code+'" value="'+esc(s.note)+'"></div>';
+    h+='<div class="entry"><div class="code">'+esc(s.code)+'</div><div class="meta">'+new Date(s.t).toLocaleString()+'</div><div class="chips">'+chips(s).map(function(c){return'<span class="chip">'+esc(c)+'</span>';}).join("")+'</div>'+srcBlock(s)+'<label for="n-'+s.code+'">Quick note (optional)</label><input id="n-'+s.code+'" data-code="'+s.code+'" value="'+esc(s.note)+'"></div>';
   });
   $("list").innerHTML=h||'<p class="meta">No stops yet. Tap “Mark stop” at your first check-in.</p>';
   [].forEach.call($("list").querySelectorAll("input[data-code]"),function(i){i.addEventListener("input",function(){var s=S.stops.filter(function(x){return x.code===i.dataset.code;})[0];s.note=i.value;save();});});
+  [].forEach.call($("list").querySelectorAll("details.src"),function(d){d.addEventListener("toggle",function(){openSrc[d.dataset.code]=d.open;});});
   plot();renderRec();
 }
 var map=null,layer=null,focusCode=null,map2=null,layer2=null;

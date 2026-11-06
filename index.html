@@ -73,15 +73,6 @@ nav button[aria-selected="true"]{background:var(--sea);color:var(--surface);bord
 </section>
 
 <section>
-  <details id="helperBox">
-    <summary><strong>Helper connection</strong> <span id="helperState" class="meta"></span></summary>
-    <p class="meta">Enables NOAA buoy readings and automatic reading of the paper log. Your coordinator gives you the address and passcode once.</p>
-    <label for="helperUrl">Helper address</label><input id="helperUrl" type="url" placeholder="https://massowsa-helper.yourname.workers.dev" autocapitalize="off" autocorrect="off">
-    <label for="helperKey">Passcode</label><input id="helperKey" type="password" autocomplete="off">
-  </details>
-</section>
-
-<section>
   <button class="mark" id="mark">Mark stop</button>
   <p id="status" role="status" aria-live="polite"></p>
   <div class="row">
@@ -104,6 +95,8 @@ nav button[aria-selected="true"]{background:var(--sea);color:var(--surface);bord
 <section>
   <h2>Paper log</h2>
   <p class="sub">Photograph the paper form after the swim, then tap “Read paper log”. Each row is matched to its code and filled in below. Check anything flagged and fix mistakes.</p>
+  <label for="helperKey">Passcode for reading the paper log (asked once per phone)</label>
+  <input id="helperKey" type="password" autocomplete="off">
   <label for="photo">Photo of paper log</label>
   <input id="photo" type="file" accept="image/*">
   <div id="photoWrap" class="hide"><img id="photoImg" alt="Paper observer log"></div>
@@ -142,13 +135,13 @@ var S={swim:"",swimmer:"",observer:"",stops:[],written:{},conf:{},unmatched:[]};
 try{var raw=localStorage.getItem(KEY);if(raw)S=Object.assign(S,JSON.parse(raw));}catch(e){}
 function save(){try{localStorage.setItem(KEY,JSON.stringify(S));}catch(e){}}
 /* Helper settings live apart from swim data so the passcode never lands in backups */
-var HKEY="massowsa-helper-v1",H={url:"",key:""};
+var HKEY="massowsa-helper-v1",H={key:""},HELPER_URL="https://mowsa-helper.mina-a6c.workers.dev";
 try{var hraw=localStorage.getItem(HKEY);if(hraw)H=Object.assign(H,JSON.parse(hraw));}catch(e){}
 function saveH(){try{localStorage.setItem(HKEY,JSON.stringify(H));}catch(e){}}
-function helperOn(){return !!(H.url&&H.key);}
+function helperOn(){return !!H.key;}
 function helperFetch(path,opts){
-  opts=opts||{};opts.headers=Object.assign({"X-Access-Key":H.key},opts.headers||{});
-  return fetch(H.url.replace(/\/+$/,"")+path,opts).then(function(r){
+  opts=opts||{};opts.headers=Object.assign(H.key?{"X-Access-Key":H.key}:{},opts.headers||{});
+  return fetch(HELPER_URL+path,opts).then(function(r){
     return r.json().catch(function(){return{};}).then(function(j){
       if(!r.ok)throw new Error(j.error||("Helper error "+r.status));
       return j;
@@ -167,11 +160,11 @@ function status(m,cls){var e=$("status");e.textContent=m;e.className=cls||"";}
   $(k).addEventListener("input",function(){S[k]=$(k).value;save();});
 });
 function helperUI(){
-  $("helperState").textContent=helperOn()?"(connected)":"(not set up)";
   $("readBtn").disabled=!(helperOn()&&photoURL&&S.stops.length);
 }
-$("helperUrl").value=H.url;$("helperKey").value=H.key;
-$("helperUrl").addEventListener("input",function(){H.url=$("helperUrl").value.trim();saveH();helperUI();});
+/* A setup link like https://observer.massowsa.org/#key=PASSCODE stores the passcode, then removes it from the address bar */
+try{var km=location.hash.match(/key=([^&]+)/);if(km){H.key=decodeURIComponent(km[1]);saveH();history.replaceState(null,"",location.pathname+location.search);}}catch(e){}
+$("helperKey").value=H.key;
 $("helperKey").addEventListener("input",function(){H.key=$("helperKey").value.trim();saveH();helperUI();});
 
 function getGPS(){
@@ -190,8 +183,7 @@ function getWeather(lat,lon){
     .then(function(j){var c=j.current||{};w.airF=c.temperature_2m;w.windMph=c.wind_speed_10m;w.windDir=c.wind_direction_10m;}).catch(function(){});
   var mr=getJSON("https://marine-api.open-meteo.com/v1/marine?latitude="+lat+"&longitude="+lon+"&current=sea_surface_temperature,wave_height&temperature_unit=fahrenheit&length_unit=imperial")
     .then(function(j){var c=j.current||{};w.waterF=c.sea_surface_temperature;w.waveFt=c.wave_height;}).catch(function(){});
-  var bu=Promise.resolve(null);
-  if(helperOn())bu=helperFetch("/buoy?lat="+lat+"&lon="+lon).catch(function(){return null;});
+  var bu=helperFetch("/buoy?lat="+lat+"&lon="+lon).catch(function(){return null;});
   return Promise.all([wx,mr,bu]).then(function(r){
     var b=r[2],src="Open-Meteo model";
     if(b){
@@ -307,8 +299,9 @@ function plotSvg(){
 
 function q(v){v=v==null?"":String(v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}
 function download(name,type,data){var a=document.createElement("a");a.href=data instanceof Blob?URL.createObjectURL(data):data;a.download=name;document.body.appendChild(a);a.click();a.remove();}
-var HEAD=["Code","Time","Latitude","Longitude","GPS accuracy (m)","Air (F)","Water (F)","Wind (mph)","Wind dir","Wave height (ft)","Quick note","Weather source"];
-function baseRow(s){return[s.code,new Date(s.t).toISOString(),s.lat,s.lon,s.acc!=null?Math.round(s.acc):"",s.airF,s.waterF,s.windMph,compass(s.windDir),s.waveFt,s.note,s.src||""];}
+function localStamp(t){var d=new Date(t),p=function(n){return String(n).padStart(2,"0");};return d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate())+" "+p(d.getHours())+":"+p(d.getMinutes())+":"+p(d.getSeconds());}
+var HEAD=["Code","Local time","Time (UTC)","Latitude","Longitude","GPS accuracy (m)","Air (F)","Water (F)","Wind (mph)","Wind dir","Wave height (ft)","Quick note","Weather source"];
+function baseRow(s){return[s.code,localStamp(s.t),new Date(s.t).toISOString(),s.lat,s.lon,s.acc!=null?Math.round(s.acc):"",s.airF,s.waterF,s.windMph,compass(s.windDir),s.waveFt,s.note,s.src||""];}
 function fileBase(){return(S.swim||"swim").replace(/[^a-z0-9]+/gi,"-").toLowerCase();}
 $("csv").addEventListener("click",function(){
   var t=[HEAD].concat(S.stops.map(baseRow)).map(function(r){return r.map(q).join(",");}).join("\n");
@@ -352,7 +345,7 @@ $("photo").addEventListener("change",function(e){
   if(photoURL)URL.revokeObjectURL(photoURL);
   photoURL=URL.createObjectURL(f);$("photoImg").src=photoURL;$("photoWrap").classList.remove("hide");
   helperUI();
-  recStatus(helperOn()?"Photo ready. Tap “Read paper log”.":"Photo added. To read it automatically, open Helper connection on the Live Log tab.", "");
+  recStatus(helperOn()?"Photo ready. Tap “Read paper log”.":"Photo added. Enter the passcode above to read it automatically.", "");
 });
 $("readBtn").addEventListener("click",function(){
   if(!helperOn()||!photoURL||!S.stops.length)return;
